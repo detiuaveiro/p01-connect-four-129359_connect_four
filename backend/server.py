@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
-
+import csv
 from websockets.asyncio.server import ServerConnection, serve
 
 logging.basicConfig(
@@ -34,6 +34,11 @@ class Connect4Server:
         self.running: bool = False
 
         self.scores: Dict[int, int] = {1: 0, 2: 0}
+        self.game_number = 0
+        self.agent_names: Dict[int, str] = {
+            1: "Player 1 (Red)",
+            2: "Player 2 (Yellow)",
+        }
 
     async def start(self, host: str = "0.0.0.0", port: int = 8765) -> None:
         """
@@ -47,9 +52,7 @@ class Connect4Server:
         async with serve(self.handle_client, host, port):
             await asyncio.Future()
 
-    async def handle_client(
-        self, websocket: ServerConnection
-    ) -> None:
+    async def handle_client(self, websocket: ServerConnection) -> None:
         """
         Handles incoming WebSocket connections and routes them based on client type.
 
@@ -63,15 +66,19 @@ class Connect4Server:
                 init_msg = init_msg.decode("utf-8")
             data: Dict[str, Any] = json.loads(init_msg)
             client_type = data.get("client", "Unknown")
+            agent_name = data.get("agent_name")
 
             if client_type == "frontend":
                 logging.info("Frontend connected.")
                 self.frontend_ws = websocket
+                await self.send_agent_names()
                 await self.update_frontend()
                 await self.frontend_loop(websocket)
             elif client_type == "agent":
                 if not self.agent1_ws:
                     self.agent1_ws = websocket
+                    if isinstance(agent_name, str) and agent_name.strip():
+                        self.agent_names[1] = agent_name.strip()
                     logging.info("Player 1 connected.")
                     try:
                         await websocket.send(
@@ -80,10 +87,13 @@ class Connect4Server:
                     except Exception:
                         self.agent1_ws = None
                         return
+                    await self.send_agent_name(1)
                     await self.check_start_conditions()
                     await self.agent_loop(websocket, 1)
                 elif not self.agent2_ws:
                     self.agent2_ws = websocket
+                    if isinstance(agent_name, str) and agent_name.strip():
+                        self.agent_names[2] = agent_name.strip()
                     logging.info("Player 2 connected.")
                     try:
                         await websocket.send(
@@ -92,6 +102,7 @@ class Connect4Server:
                     except Exception:
                         self.agent2_ws = None
                         return
+                    await self.send_agent_name(2)
                     await self.check_start_conditions()
                     await self.agent_loop(websocket, 2)
                 else:
@@ -104,18 +115,18 @@ class Connect4Server:
                 self.frontend_ws = None
             elif websocket == self.agent1_ws:
                 self.agent1_ws = None
+                self.agent_names[1] = "Player 1 (Red)"
                 self.running = False
                 logging.info("Player 1 disconnected. Pausing game.")
                 await self.update_frontend()
             elif websocket == self.agent2_ws:
                 self.agent2_ws = None
+                self.agent_names[2] = "Player 2 (Yellow)"
                 self.running = False
                 logging.info("Player 2 disconnected. Pausing game.")
                 await self.update_frontend()
 
-    async def frontend_loop(
-        self, websocket: ServerConnection
-    ) -> None:
+    async def frontend_loop(self, websocket: ServerConnection) -> None:
         """
         Keeps the frontend connection alive.
 
@@ -125,9 +136,7 @@ class Connect4Server:
         async for _ in websocket:
             pass  # Frontend is view-only for now
 
-    async def agent_loop(
-        self, websocket: ServerConnection, player_id: int
-    ) -> None:
+    async def agent_loop(self, websocket: ServerConnection, player_id: int) -> None:
         """
         Main loop for communicating with game agents.
 
@@ -160,7 +169,9 @@ class Connect4Server:
         Checks if both agents are connected and starts the game if they are.
         """
         if self.agent1_ws and self.agent2_ws and not self.running:
-            logging.info(f"Both agents connected. Starting round. Player {self.first_player_this_round} goes first.")
+            logging.info(
+                f"Both agents connected. Starting round. Player {self.first_player_this_round} goes first."
+            )
             self.running = True
             self.board = [[0 for _ in range(self.cols)] for _ in range(self.rows)]
             self.current_turn = self.first_player_this_round
@@ -188,7 +199,9 @@ class Connect4Server:
             The row index where the piece landed, or None if the move was invalid.
         """
         if col not in self.get_valid_actions():
-            logging.warning(f"Player {player_id} attempted invalid move in column {col}")
+            logging.warning(
+                f"Player {player_id} attempted invalid move in column {col}"
+            )
             return None
 
         # Gravity: drop the piece to the lowest available row
@@ -215,11 +228,24 @@ class Connect4Server:
         if winner:
             logging.info(f"Player {winner} wins the round!")
             self.scores[winner] += 1
+            self.game_number += 1
+            with open("/tmp/scores.csv", mode="a", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(
+                    [self.game_number, winner, self.scores[1], self.scores[2]]
+                )
             await self.end_round(f"Player {winner} Wins!")
             return True
         elif not valid_actions:
             logging.info("Round ended in a Draw.")
+            self.game_number += 1
+            with open("/tmp/scores.csv", mode="a", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(
+                    [self.game_number, "Draw", self.scores[1], self.scores[2]]
+                )
             await self.end_round("Draw!")
+
             return True
         return False
 
@@ -292,7 +318,9 @@ class Connect4Server:
         if self.agent1_ws and self.agent2_ws:
             await self.check_start_conditions()
         else:
-            logging.info("Round ended and an agent disconnected. Waiting for players...")
+            logging.info(
+                "Round ended and an agent disconnected. Waiting for players..."
+            )
 
     async def broadcast_to_agents(self, payload: Dict[str, Any]) -> None:
         """
@@ -329,6 +357,29 @@ class Connect4Server:
         }
         await self.broadcast_to_agents(payload)
 
+    async def send_agent_name(self, player_id: int) -> None:
+        """
+        Sends one player's display name to the frontend.
+        """
+        if self.frontend_ws:
+            payload: Dict[str, Any] = {
+                "type": "agent_name",
+                "player_id": player_id,
+                "agent_name": self.agent_names[player_id],
+            }
+            try:
+                await self.frontend_ws.send(json.dumps(payload))
+            except Exception:
+                self.frontend_ws = None
+                logging.info("Frontend disconnected.")
+
+    async def send_agent_names(self) -> None:
+        """
+        Sends all known agent display names to the frontend.
+        """
+        for player_id in (1, 2):
+            await self.send_agent_name(player_id)
+
     async def update_frontend(self, game_over_msg: Optional[str] = None) -> None:
         """
         Sends current game state to the frontend.
@@ -345,6 +396,7 @@ class Connect4Server:
                 "p1_connected": self.agent1_ws is not None,
                 "p2_connected": self.agent2_ws is not None,
                 "game_over": game_over_msg,
+                "agent_names": self.agent_names,
             }
             try:
                 await self.frontend_ws.send(json.dumps(payload))

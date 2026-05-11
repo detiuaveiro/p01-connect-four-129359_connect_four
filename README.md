@@ -150,6 +150,7 @@ For more details on the API, please refer to the [documentation](https://mariolp
 ## Authors
 
 * **Mário Antunes** - [mariolpantunes](https://github.com/mariolpantunes)
+* **Nihal Fateen** - [NihalFateen](https://github.com/Nihalfateen)
 
 ## License
 

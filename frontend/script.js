@@ -10,6 +10,12 @@ class App {
     this.cellSize = 100;
 
     this.board = null;
+
+    this.agentNames = {
+      1: "Player 1 (Red)",
+      2: "Player 2 (Yellow)"
+    };
+
     this.setupWebsocket();
     this.drawEmptyBoard();
   }
@@ -19,22 +25,30 @@ class App {
 
     this.ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+
+      if (data.type === "agent_name") {
+        this.agentNames[data.player_id] = data.agent_name;
+      }
+
       if (data.type === "update") {
         this.board = data.board;
+        if (data.agent_names) {
+          this.agentNames = { ...this.agentNames, ...data.agent_names };
+        }
 
-        // Update UI Status
         document.getElementById("p1-status").innerText = data.p1_connected
-          ? "Player 1 (Red): Connected"
-          : "Player 1 (Red): Disconnected";
+          ? `${this.agentNames[1]}: Connected`
+          : `${this.agentNames[1]}: Disconnected`;
         document.getElementById("p2-status").innerText = data.p2_connected
-          ? "Player 2 (Yellow): Connected"
-          : "Player 2 (Yellow): Disconnected";
+          ? `${this.agentNames[2]}: Connected`
+          : `${this.agentNames[2]}: Disconnected`;
+
         document.getElementById("p1-score").innerText = data.scores[1];
         document.getElementById("p2-score").innerText = data.scores[2];
 
         const turnText = document.getElementById("turn-indicator");
         if (data.p1_connected && data.p2_connected) {
-          turnText.innerText = `Current Turn: Player ${data.current_turn}`;
+          turnText.innerText = `Current Turn: ${this.agentNames[data.current_turn]}`;
           turnText.style.color =
             data.current_turn === 1 ? "#BF616A" : "#EBCB8B";
         } else {

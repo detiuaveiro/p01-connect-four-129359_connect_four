@@ -1,4 +1,3 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/ovfM0qtv)
 # <img src="frontend/favicon.svg" alt="logo" width="128" height="128" align="middle"> SI2 - Connect Four
 
 Connect Four is a classic two-player connection board game in which the players choose a color and then take turns dropping colored discs into a seven-column, six-row vertically suspended grid. The pieces fall straight down, occupying the lowest available space within the column. The objective of the game is to be the first to form a horizontal, vertical, or diagonal line of four of one's own discs.
@@ -39,6 +38,20 @@ The "simulation" is launched using Docker Compose, which starts the backend serv
     ```bash
     python agents/manual_agent.py
     ```
+    or run the submitted autonomous agent:
+    ```bash
+    python agents/my_agent.py
+    ```
+
+For an automated match, open two terminals after the backend is running and start:
+```bash
+python agents/my_agent.py
+python agents/dummy_agent.py
+```
+
+The server assigns Player 1 and Player 2 in connection order. The frontend at
+`http://localhost:8080` shows the board, whose turn it is, connection status,
+and the running score.
 
 ## Project Structure
 
@@ -48,7 +61,75 @@ The "simulation" is launched using Docker Compose, which starts the backend serv
     - `base_agent.py`: the abstract base class for agents.
     - `dummy_agent.py`: a simple automated agent that makes random moves.
     - `manual_agent.py`: an agent that allows manual player interaction via the terminal.
+    - `my_agent.py`: the submitted autonomous agent using Minimax with alpha-beta pruning.
 - `compose.yml`: Docker Compose configuration to run the backend and frontend.
+
+## Solution Architecture
+
+The project follows the required client-server structure:
+
+- The backend WebSocket server owns the official board state, validates moves,
+  applies gravity, checks wins/draws, tracks scores, and broadcasts the current
+  state.
+- Agents connect as WebSocket clients. On every state update, an agent only
+  acts when `current_turn` matches its assigned `player_id`.
+- The frontend connects as a viewer client and renders the live board and score.
+- `MyAgent` stores the latest board received from the server, evaluates legal
+  columns, and sends a selected column back as a move.
+
+## Submitted Agent
+
+`agents/my_agent.py` implements a depth-limited Minimax search with alpha-beta
+pruning. The heuristic rewards:
+
+- Center-column control, because central discs participate in more possible
+  four-in-a-row lines.
+- Completed four-disc lines.
+- Three-in-a-row and two-in-a-row patterns with open spaces.
+- Defensive blocking when the opponent has three discs and one empty cell in a
+  four-cell window.
+
+The agent now uses its assigned `player_id`, so it works correctly as either
+Player 1 or Player 2. It also uses the same board orientation as the server:
+row `0` is the top of the board and row `5` is the bottom, so a column is legal
+when the top cell is empty and simulated pieces fall to the lowest empty row.
+
+Search depth is set to `5`, which gives a stronger strategy than a random
+agent while keeping moves responsive for live matches.
+
+## Evaluation
+
+The implemented agent should consistently outperform `dummy_agent.py` because
+it searches future positions instead of selecting random legal moves. In logic
+checks, it prioritizes central columns, takes immediate wins when available,
+and blocks many direct opponent threats.
+
+Expected strengths:
+
+- Strong tactical play in short and medium-range positions.
+- Much better move quality than random play.
+- Works from both player positions.
+
+Known limitations:
+
+- Depth `5` is not a solved-game strategy; deeper forced wins can still be
+  missed.
+- The heuristic is handcrafted, so it may prefer locally good patterns over a
+  long-term forced plan.
+- Increasing depth improves strength but also increases move time.
+
+## Contributions and Fixes
+
+The repository includes the following project-specific additions beyond the
+base simulation:
+
+- A custom autonomous Connect Four agent in `agents/my_agent.py`.
+- Score logging in the backend to `/tmp/scores.csv` after wins and draws.
+- Automatic round restart and alternating first player between rounds.
+- Frontend support for agent display names.
+- Backend support for receiving and broadcasting agent display names.
+- Fixes in the agent simulation logic so column validity, gravity, and player
+  identity match the server.
 
 ## Development
 
@@ -69,6 +150,7 @@ For more details on the API, please refer to the [documentation](https://mariolp
 ## Authors
 
 * **Mário Antunes** - [mariolpantunes](https://github.com/mariolpantunes)
+* **Nihal Fateen** - [NihalFateen](https://github.com/Nihalfateen)
 
 ## License
 
